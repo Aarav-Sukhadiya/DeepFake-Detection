@@ -1,160 +1,114 @@
-Deepfake Detection in Images and Videos with Timestamp Localization
-Overview
+# Deepfake Detection in Images and Videos with Timestamp Localization
 
-This project implements an end-to-end deepfake detection system that works on both images and videos.
-Unlike simple binary classifiers, the system localizes manipulated segments in videos with timestamps and confidence scores, making it suitable for forensic analysis and explainable AI use cases.
+## Overview
 
-The system is designed to:
+This project implements an end-to-end deepfake detection system that works on both images and videos.  
+In addition to classifying content as real or fake, the system localizes manipulated regions in videos and reports precise timestamps with confidence scores.
 
-run on a standard laptop
+The emphasis of this project is on temporal reasoning, explainability, and practical usability rather than black-box classification.
 
-optionally use GPU (CUDA) if available
+---
 
-provide interpretable JSON outputs
+## Key Features
 
-handle partially manipulated videos
+- Image-level deepfake detection with confidence score
+- Video-level deepfake detection with partial manipulation support
+- Timestamp localization of manipulated video segments
+- Stable temporal predictions (no flickering)
+- Single calibrated confidence value per detected segment
+- Runs on CPU and GPU (CUDA) automatically
+- Streamlit-based frontend for easy demonstration
+- Fully local execution (no external APIs)
 
-Key Features
+---
 
-Image deepfake detection with confidence score
+## System Pipeline
 
-Video deepfake detection with timestamp localization
+1. Input image or video
+2. Frame extraction (videos only)
+3. Face detection and lightweight tracking
+4. CNN-based feature extraction (ResNet-18)
+5. Frame-level fake probability estimation
+6. Sliding window temporal aggregation
+7. Hysteresis-based segment merging
+8. Final prediction with timestamps and confidence
 
-Handles videos containing both real and fake segments
+---
 
-Temporal reasoning for stable, non-flickering predictions
+## Data Assumptions
 
-Calibrated confidence scores
+- Videos are stored inside:
+  - `data/videos/real`
+  - `data/videos/fake`
+- Subfolders inside `real` and `fake` directories are supported
+- Videos may contain both real and fake segments
+- At least one visible face is assumed in most frames
+- Performance may degrade under extreme compression or very low resolution
 
-Lightweight Streamlit frontend for demo
+---
 
-CPU-safe and GPU-accelerated training and inference
+## Model Design
 
-Project Pipeline
-Input Image / Video
-   ↓
-Frame Extraction (video only)
-   ↓
-Face Detection & Lightweight Tracking
-   ↓
-CNN-based Feature Extraction
-   ↓
-Frame-level Fake Probability
-   ↓
-Temporal Window Aggregation
-   ↓
-Segment Merging & Confidence Estimation
-   ↓
-Final Prediction + Timestamps (JSON)
+### Feature Extraction
 
-Folder Structure
-deepfake_project/
-├── data/
-│   └── videos/
-│       ├── real/
-│       └── fake/
-├── models/
-│   └── image_model.pth
-├── src/
-│   ├── image_infer.py
-│   ├── video_infer.py
-│   ├── preprocess.py
-│   ├── temporal_utils.py
-│   └── train_streamed.py
-├── frontend.py
-├── requirements.txt
-└── README.md
+- CNN backbone: ResNet-18
+- Operates on cropped face regions
+- Learns spatial artifacts introduced by deepfake generation
 
-Data Assumptions
+### Temporal Reasoning
 
-Videos are placed under:
+Temporal reasoning is implemented algorithmically:
 
-data/videos/real/
-data/videos/fake/
+- Sliding window aggregation over frame probabilities
+- Median window scoring for robustness
+- Hysteresis thresholds to avoid flickering predictions
+- Minimum segment duration filtering
+- Segment-level confidence re-scoring
 
+This approach prioritizes interpretability and computational efficiency.
 
-Subfolders inside real and fake are supported
+### Confidence Estimation
 
-Labels are video-level, but detection is segment-level
+- Frame-level probabilities are calibrated using temperature scaling
+- Segment confidence is computed from stable window-level evidence
+- A single interpretable confidence value is reported per segment
 
-Faces are assumed to be present in most frames
+---
 
-Extreme compression or very low resolution may reduce performance
-
-Model Design
-Feature Extraction
-
-CNN backbone: ResNet-18
-
-Trained on video frames
-
-Operates on face crops for better signal-to-noise ratio
-
-Temporal Reasoning
-
-Sliding window aggregation over frame probabilities
-
-Median window scoring for robustness
-
-Hysteresis thresholds for temporal stability
-
-Segment merging with minimum duration constraints
-
-Confidence Estimation
-
-CNN outputs are calibrated using temperature scaling
-
-Segment confidence is computed from stable window-level evidence
-
-Outputs a single, interpretable confidence number
-
-Training
+## Training
 
 Training is streamed and memory-efficient:
 
-Videos are processed one at a time
+- Videos are processed sequentially
+- Frames are processed in mini-batches
+- Frames are never stored on disk
+- GPU acceleration is used automatically if available
 
-Frames are processed one batch at a time
+### Train the Model
 
-Frames are not stored on disk
-
-Supports GPU acceleration with:
-
-mini-batching
-
-mixed precision (AMP)
-
-cuDNN benchmarking
-
-Train the Model
+```bash
 python src/train_streamed.py
-
-
 The trained model is saved to:
 
 models/image_model.pth
-
 Inference
 Image Inference
+Input: single image
 
-Single image
-
-Outputs fake/real confidence
+Output: fake probability (confidence score)
 
 Video Inference
+Input: video file
 
-Processes video frames sequentially
+Output:
 
-Aggregates predictions temporally
+video-level fake prediction
 
-Outputs:
-
-overall video confidence
+overall confidence score
 
 timestamped manipulated segments
 
-Example output:
-
+Example Output
 {
   "input_type": "video",
   "video_is_fake": true,
@@ -167,72 +121,41 @@ Example output:
     }
   ]
 }
-
-Frontend Demo
-
-A simple Streamlit UI is provided.
-
-Run the Frontend
-streamlit run frontend.py
-
-
-Features:
-
-Upload image or video
-
-Run real inference
-
-View JSON output directly
-
 Installation
-Windows (CUDA / NVIDIA GPU)
+Single Command (Windows / Linux, CPU or GPU)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118 opencv-python numpy pillow streamlit
-
-CPU-only (Any OS)
-pip install torch torchvision opencv-python numpy pillow streamlit
+GPU acceleration is used automatically if CUDA is available.
 
 Evaluation Metrics (Conceptual)
-
-Precision / Recall
+Precision and recall
 
 Temporal Intersection over Union (tIoU)
 
 Segment-level precision and recall
 
-Temporal stability (non-flickering segments)
+Temporal stability
 
 Detection delay
 
-Robustness to compression and lighting variations
+Robustness under compression and lighting variations
 
 Limitations
-
-Uses algorithmic temporal reasoning, not learned temporal models
+Uses algorithmic temporal reasoning instead of learned temporal models
 
 Assumes a dominant face per video
 
-Performance degrades under extreme compression or occlusion
+Not intended for production deployment
 
-Not intended for production use
+Extreme video degradation may reduce accuracy
 
 Ethical Considerations
-
-Outputs are probabilistic, not absolute truth
+Outputs are probabilistic and not absolute judgments
 
 Intended for human-in-the-loop analysis
 
 Not suitable for automated legal or disciplinary decisions
 
-Future Work
-
-Learned temporal models (1D CNN / LSTM)
-
-Multi-face tracking
-
-Domain-specific fine-tuning
-
-Improved robustness under extreme degradation
-
 Conclusion
+This project demonstrates a practical and explainable approach to deepfake detection with timestamp localization by combining CNN-based spatial analysis with robust temporal reasoning and calibrated confidence estimation.
 
-This project demonstrates a practical, explainable deepfake detection system that goes beyond binary classification by providing timestamp-level localization and calibrated confidence scores, while remaining computationally feasible and interpretable.
+```
