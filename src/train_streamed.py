@@ -1,8 +1,10 @@
 # src/train_streamed.py
-# GPU-optimized streamed training WITH FPS = 12
-# Tier-2 optimizations applied:
-# 1) Reduced input resolution
-# 2) Frozen backbone (train classifier head only)
+# FINAL PATCHED VERSION
+# - Training FPS = 12
+# - GPU optimized (AMP, cuDNN, pinned memory)
+# - Tier-2 optimizations (smaller input, frozen backbone)
+# - Edge-case handling
+# - Ctrl+C safe checkpoint saving
 
 import os
 import cv2
@@ -15,13 +17,13 @@ from torch.cuda.amp import autocast, GradScaler
 
 # ---------------- CONFIG ----------------
 DATA_DIR = "data/videos"     # data/videos/real and data/videos/fake (recursive)
-EPOCHS = 2
-LR = 1e-4
+EPOCHS = 5
+LR = 5e-5
 BATCH_SIZE = 16
-FPS = 12                    # training FPS
+FPS = 12
+INPUT_SIZE = 160
 MODEL_PATH = "models/image_model.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-INPUT_SIZE = 160            # Tier-2: smaller resolution
 # ---------------------------------------
 
 print(f"Training on device: {DEVICE}")
@@ -30,7 +32,7 @@ print(f"Training on device: {DEVICE}")
 torch.backends.cudnn.benchmark = True
 cv2.setNumThreads(0)
 torch.set_num_threads(os.cpu_count())
-# ------------------------------------------
+# ----------------------------------------
 
 # ---------------- PREPROCESS ----------------
 transform = transforms.Compose([
@@ -41,11 +43,14 @@ transform = transforms.Compose([
 # ---------------- MODEL ----------------
 model = resnet18(weights="IMAGENET1K_V1")
 
-# Tier-2: freeze backbone
+# Freeze backbone
 for param in model.parameters():
     param.requires_grad = False
 
-# Train only classifier head
+# Train classifier head + last block (better quality)
+for param in model.layer4.parameters():
+    param.requires_grad = True
+
 model.fc = nn.Linear(model.fc.in_features, 2)
 for param in model.fc.parameters():
     param.requires_grad = True
@@ -53,15 +58,24 @@ for param in model.fc.parameters():
 model.to(DEVICE)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.fc.parameters(), lr=LR)
+optimizer = torch.optim.Adam(
+    filter(lambda p: p.requires_grad, model.parameters()),
+    lr=LR
+)
 scaler = GradScaler()
 # --------------------------------------
 
 
 def train_on_video(video_path: str, label: int):
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Warning: cannot open video {video_path}")
+        return
 
     video_fps = cap.get(cv2.CAP_PROP_FPS)
+    if video_fps <= 0:
+        video_fps = FPS
+
     interval = max(int(video_fps // FPS), 1)
 
     frames = []
@@ -80,11 +94,7 @@ def train_on_video(video_path: str, label: int):
                 labels.append(label)
 
             if len(frames) == BATCH_SIZE:
-                x = (
-                    torch.stack(frames)
-                    .pin_memory()
-                    .to(DEVICE, non_blocking=True)
-                )
+                x = torch.stack(frames).pin_memory().to(DEVICE, non_blocking=True)
                 y = torch.tensor(labels, dtype=torch.long).to(DEVICE)
 
                 optimizer.zero_grad()
@@ -101,13 +111,9 @@ def train_on_video(video_path: str, label: int):
 
         frame_id += 1
 
-    # Train on remaining frames
+    # remaining frames
     if frames:
-        x = (
-            torch.stack(frames)
-            .pin_memory()
-            .to(DEVICE, non_blocking=True)
-        )
+        x = torch.stack(frames).pin_memory().to(DEVICE, non_blocking=True)
         y = torch.tensor(labels, dtype=torch.long).to(DEVICE)
 
         optimizer.zero_grad()
@@ -140,10 +146,17 @@ def train():
                         print(f"Training on: {video_path}")
                         train_on_video(video_path, label)
 
-    os.makedirs("models", exist_ok=True)
-    torch.save(model.state_dict(), MODEL_PATH)
-    print(f"\nModel saved to {MODEL_PATH}")
+        # epoch checkpoint
+        os.makedirs("models", exist_ok=True)
+        torch.save(model.state_dict(), MODEL_PATH)
+        print(f"Checkpoint saved after epoch {epoch + 1}")
 
 
 if __name__ == "__main__":
-    train()
+    try:
+        train()
+    except KeyboardInterrupt:
+        print("\nTraining interrupted. Saving model...")
+        os.makedirs("models", exist_ok=True)
+        torch.save(model.state_dict(), MODEL_PATH)
+        print(f"Model saved to {MODEL_PATH}")

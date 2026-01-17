@@ -12,7 +12,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEMPERATURE = 2.0
 
 # Decision threshold for images
-IMAGE_FAKE_THRESHOLD = 0.5
+IMAGE_FAKE_THRESHOLD = 0.75
 
 # ---------------- Model ----------------
 model = resnet18(weights="IMAGENET1K_V1")
